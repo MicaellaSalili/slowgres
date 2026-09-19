@@ -1,0 +1,24 @@
+[
+  {
+    "_comment": "HAND-WRITTEN FIXTURE. Modeled after PostgreSQL 16 EXPLAIN (ANALYZE, FORMAT JSON). Triggers 'row_estimate_mismatch'. Planner estimated 10 rows (e.g. stale stats after massive load), but actual execution returned 85,000 rows (8,500x underestimation). To generate on local Postgres: INSERT INTO logs SELECT generate_series(1, 100000); (do NOT run ANALYZE); EXPLAIN (ANALYZE, FORMAT JSON) SELECT * FROM logs WHERE id > 15000;",
+    "Plan": {
+      "Node Type": "Seq Scan",
+      "Parallel Aware": false,
+      "Async Capable": false,
+      "Relation Name": "audit_logs",
+      "Schema": "public",
+      "Alias": "audit_logs",
+      "Startup Cost": 0.00,
+      "Total Cost": 1680.00,
+      "Plan Rows": 10,
+      "Plan Width": 64,
+      "Actual Startup Time": 0.015,
+      "Actual Total Time": 24.800,
+      "Actual Rows": 85000,
+      "Actual Loops": 1
+    },
+    "Planning Time": 0.090,
+    "Execution Time": 28.500,
+    "Triggers": []
+  }
+]

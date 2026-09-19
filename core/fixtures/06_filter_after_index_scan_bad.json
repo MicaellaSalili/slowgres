@@ -1,0 +1,30 @@
+[
+  {
+    "_comment": "HAND-WRITTEN FIXTURE. Modeled after PostgreSQL 16 EXPLAIN (ANALYZE, FORMAT JSON). Triggers 'filter_after_index_scan'. Index Only Scan forced to fetch 8,500 heap pages due to unvacuumed visibility maps, and Index Scan with heavy filter discard. To generate on local Postgres: CREATE TABLE accounts (id serial, org_id int, status text, balance numeric); CREATE INDEX idx_acc_org ON accounts(org_id); INSERT INTO accounts SELECT g, (g % 5) + 1, CASE WHEN g % 10 = 0 THEN 'active' ELSE 'suspended' END, g * 1.5 FROM generate_series(1, 100000) g; (do NOT VACUUM); EXPLAIN (ANALYZE, FORMAT JSON) SELECT org_id FROM accounts WHERE org_id = 1 AND status = 'active';",
+    "Plan": {
+      "Node Type": "Index Only Scan",
+      "Parallel Aware": false,
+      "Async Capable": false,
+      "Scan Direction": "Forward",
+      "Index Name": "idx_accounts_org_id",
+      "Relation Name": "accounts",
+      "Schema": "public",
+      "Alias": "accounts",
+      "Startup Cost": 0.29,
+      "Total Cost": 650.00,
+      "Plan Rows": 2000,
+      "Plan Width": 4,
+      "Actual Startup Time": 0.045,
+      "Actual Total Time": 18.500,
+      "Actual Rows": 2000,
+      "Actual Loops": 1,
+      "Index Cond": "(org_id = 1)",
+      "Filter": "(status = 'active'::text)",
+      "Rows Removed by Filter": 18000,
+      "Heap Fetches": 8500
+    },
+    "Planning Time": 0.160,
+    "Execution Time": 18.900,
+    "Triggers": []
+  }
+]

@@ -1,0 +1,28 @@
+[
+  {
+    "_comment": "HAND-WRITTEN FIXTURE. Modeled after PostgreSQL 16 EXPLAIN (ANALYZE, FORMAT JSON). Healthy plan with index scan on (status, created_at) with 0 rows removed by filter. Does NOT trigger 'seq_scan_filtered'.",
+    "Plan": {
+      "Node Type": "Index Scan",
+      "Parallel Aware": false,
+      "Async Capable": false,
+      "Scan Direction": "Forward",
+      "Index Name": "idx_orders_status_created_at",
+      "Relation Name": "orders",
+      "Schema": "public",
+      "Alias": "orders",
+      "Startup Cost": 0.29,
+      "Total Cost": 142.50,
+      "Plan Rows": 5000,
+      "Plan Width": 36,
+      "Actual Startup Time": 0.045,
+      "Actual Total Time": 2.120,
+      "Actual Rows": 5000,
+      "Actual Loops": 1,
+      "Index Cond": "((status = 'pending'::text) AND (created_at >= '2024-01-01'::date))",
+      "Rows Removed by Index Recheck": 0
+    },
+    "Planning Time": 0.180,
+    "Execution Time": 2.450,
+    "Triggers": []
+  }
+]

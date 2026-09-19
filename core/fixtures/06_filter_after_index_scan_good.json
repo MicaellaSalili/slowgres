@@ -1,0 +1,28 @@
+[
+  {
+    "_comment": "HAND-WRITTEN FIXTURE. Modeled after PostgreSQL 16 EXPLAIN (ANALYZE, FORMAT JSON). Healthy Index Only Scan on a fully vacuumed table with 0 Heap Fetches and 0 rows removed by filter. Does NOT trigger 'filter_after_index_scan'.",
+    "Plan": {
+      "Node Type": "Index Only Scan",
+      "Parallel Aware": false,
+      "Async Capable": false,
+      "Scan Direction": "Forward",
+      "Index Name": "idx_accounts_org_status",
+      "Relation Name": "accounts",
+      "Schema": "public",
+      "Alias": "accounts",
+      "Startup Cost": 0.29,
+      "Total Cost": 85.00,
+      "Plan Rows": 2000,
+      "Plan Width": 4,
+      "Actual Startup Time": 0.025,
+      "Actual Total Time": 1.150,
+      "Actual Rows": 2000,
+      "Actual Loops": 1,
+      "Index Cond": "((org_id = 1) AND (status = 'active'::text))",
+      "Heap Fetches": 0
+    },
+    "Planning Time": 0.140,
+    "Execution Time": 1.350,
+    "Triggers": []
+  }
+]

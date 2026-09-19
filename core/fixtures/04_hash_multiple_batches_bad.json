@@ -1,0 +1,79 @@
+[
+  {
+    "_comment": "HAND-WRITTEN FIXTURE. Modeled after PostgreSQL 16 EXPLAIN (ANALYZE, FORMAT JSON). Triggers 'hash_multiple_batches'. Hash join build table exceeded work_mem, partitioning the hash table into 4 batches. To generate on local Postgres: SET work_mem = '64kB'; EXPLAIN (ANALYZE, FORMAT JSON) SELECT * FROM generate_series(1, 100000) a JOIN generate_series(1, 100000) b ON a = b;",
+    "Plan": {
+      "Node Type": "Hash Join",
+      "Parallel Aware": false,
+      "Async Capable": false,
+      "Join Type": "Inner",
+      "Startup Cost": 1450.00,
+      "Total Cost": 3600.00,
+      "Plan Rows": 100000,
+      "Plan Width": 8,
+      "Actual Startup Time": 25.100,
+      "Actual Total Time": 88.400,
+      "Actual Rows": 100000,
+      "Actual Loops": 1,
+      "Hash Cond": "(a.id = b.id)",
+      "Plans": [
+        {
+          "Node Type": "Seq Scan",
+          "Parent Relationship": "Outer",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Relation Name": "table_a",
+          "Schema": "public",
+          "Alias": "a",
+          "Startup Cost": 0.00,
+          "Total Cost": 1150.00,
+          "Plan Rows": 100000,
+          "Plan Width": 4,
+          "Actual Startup Time": 0.020,
+          "Actual Total Time": 14.500,
+          "Actual Rows": 100000,
+          "Actual Loops": 1
+        },
+        {
+          "Node Type": "Hash",
+          "Parent Relationship": "Inner",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Startup Cost": 1150.00,
+          "Total Cost": 1150.00,
+          "Plan Rows": 100000,
+          "Plan Width": 4,
+          "Actual Startup Time": 24.500,
+          "Actual Total Time": 24.500,
+          "Actual Rows": 100000,
+          "Actual Loops": 1,
+          "Hash Batches": 4,
+          "Original Hash Batches": 4,
+          "Hash Buckets": 32768,
+          "Peak Memory Usage": 4096,
+          "Plans": [
+            {
+              "Node Type": "Seq Scan",
+              "Parent Relationship": "Outer",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Relation Name": "table_b",
+              "Schema": "public",
+              "Alias": "b",
+              "Startup Cost": 0.00,
+              "Total Cost": 1150.00,
+              "Plan Rows": 100000,
+              "Plan Width": 4,
+              "Actual Startup Time": 0.020,
+              "Actual Total Time": 14.200,
+              "Actual Rows": 100000,
+              "Actual Loops": 1
+            }
+          ]
+        }
+      ]
+    },
+    "Planning Time": 0.220,
+    "Execution Time": 92.400,
+    "Triggers": []
+  }
+]

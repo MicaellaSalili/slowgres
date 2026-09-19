@@ -1,0 +1,44 @@
+[
+  {
+    "_comment": "HAND-WRITTEN FIXTURE. Modeled after PostgreSQL 16 EXPLAIN (ANALYZE, FORMAT JSON). Healthy Sort completed entirely in memory using quicksort with Sort Space Type Memory. Does NOT trigger 'sort_spill_to_disk'.",
+    "Plan": {
+      "Node Type": "Sort",
+      "Parallel Aware": false,
+      "Async Capable": false,
+      "Startup Cost": 150.00,
+      "Total Cost": 160.00,
+      "Plan Rows": 1000,
+      "Plan Width": 36,
+      "Actual Startup Time": 0.450,
+      "Actual Total Time": 0.520,
+      "Actual Rows": 1000,
+      "Actual Loops": 1,
+      "Sort Key": ["id"],
+      "Sort Method": "quicksort",
+      "Sort Space Used": 56,
+      "Sort Space Type": "Memory",
+      "Plans": [
+        {
+          "Node Type": "Seq Scan",
+          "Parent Relationship": "Outer",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Relation Name": "categories",
+          "Schema": "public",
+          "Alias": "categories",
+          "Startup Cost": 0.00,
+          "Total Cost": 25.00,
+          "Plan Rows": 1000,
+          "Plan Width": 36,
+          "Actual Startup Time": 0.010,
+          "Actual Total Time": 0.150,
+          "Actual Rows": 1000,
+          "Actual Loops": 1
+        }
+      ]
+    },
+    "Planning Time": 0.075,
+    "Execution Time": 0.580,
+    "Triggers": []
+  }
+]

@@ -1,0 +1,26 @@
+[
+  {
+    "_comment": "HAND-WRITTEN FIXTURE. Modeled after PostgreSQL 16 EXPLAIN (ANALYZE, FORMAT JSON). Triggers 'seq_scan_filtered'. To generate a real plan on local Postgres: CREATE TABLE orders (id serial primary key, status text, created_at date); INSERT INTO orders SELECT g, CASE WHEN g % 20 = 0 THEN 'pending' ELSE 'completed' END, CURRENT_DATE - (g % 365) FROM generate_series(1, 100000) g; EXPLAIN (ANALYZE, FORMAT JSON) SELECT * FROM orders WHERE status = 'pending' AND created_at >= '2024-01-01';",
+    "Plan": {
+      "Node Type": "Seq Scan",
+      "Parallel Aware": false,
+      "Async Capable": false,
+      "Relation Name": "orders",
+      "Schema": "public",
+      "Alias": "orders",
+      "Startup Cost": 0.00,
+      "Total Cost": 2150.00,
+      "Plan Rows": 4500,
+      "Plan Width": 36,
+      "Actual Startup Time": 0.022,
+      "Actual Total Time": 38.450,
+      "Actual Rows": 5000,
+      "Actual Loops": 1,
+      "Filter": "((status = 'pending'::text) AND (created_at >= '2024-01-01'::date))",
+      "Rows Removed by Filter": 95000
+    },
+    "Planning Time": 0.115,
+    "Execution Time": 39.120,
+    "Triggers": []
+  }
+]
