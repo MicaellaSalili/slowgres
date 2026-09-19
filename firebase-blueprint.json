@@ -1,0 +1,49 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile with plan entitlements and quota usage tracking.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth user ID" },
+        "email": { "type": "string", "description": "User email address" },
+        "displayName": { "type": "string", "description": "User display name" },
+        "photoURL": { "type": "string", "description": "Avatar photo URL" },
+        "plan": { "type": "string", "enum": ["free", "premium"], "description": "Active plan tier" },
+        "dailyQuotaUsed": { "type": "number", "description": "Daily count of plan analyses run" },
+        "lastQuotaDate": { "type": "string", "description": "Calendar date string YYYY-MM-DD for quota tracking" },
+        "createdAt": { "type": "string", "description": "Creation timestamp" },
+        "updatedAt": { "type": "string", "description": "Last update timestamp" }
+      },
+      "required": ["uid", "email", "plan"]
+    },
+    "SavedPlanAnalysis": {
+      "title": "SavedPlanAnalysis",
+      "description": "Saved PostgreSQL EXPLAIN plan analysis and diagnostic findings.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique analysis record identifier" },
+        "userId": { "type": "string", "description": "Owner user UID" },
+        "title": { "type": "string", "description": "Summary title of the analyzed query plan" },
+        "query_text": { "type": "string", "description": "Original SQL query statement" },
+        "total_time_ms": { "type": "number", "description": "Total execution runtime in milliseconds" },
+        "planning_time_ms": { "type": "number", "description": "Planning duration in milliseconds" },
+        "findings_count": { "type": "number", "description": "Count of findings identified" },
+        "critical_count": { "type": "number", "description": "Count of critical bottlenecks" },
+        "created_at": { "type": "string", "description": "Creation timestamp" },
+        "analysis_json": { "type": "string", "description": "JSON string of complete AnalysisResult" }
+      },
+      "required": ["id", "userId", "title", "total_time_ms", "findings_count", "created_at", "analysis_json"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "#/entities/UserProfile",
+      "description": "User account document containing profile information and plan quota."
+    },
+    "/users/{userId}/analyses/{analysisId}": {
+      "schema": "#/entities/SavedPlanAnalysis",
+      "description": "Sub-collection storing historical plan analyses for each authenticated user."
+    }
+  }
+}

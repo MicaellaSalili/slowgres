@@ -2,5 +2,7 @@
   "name": "Slowgres",
   "description": "A slow-query analyzer for PostgreSQL. Find out why it's slow.",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }

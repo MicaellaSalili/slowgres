@@ -14,110 +14,90 @@ export const LegalModal: React.FC<LegalModalProps> = ({ activeDoc, onClose }) =>
   return (
     <div
       id="legal-modal-backdrop"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/70 backdrop-blur-md p-3 sm:p-4 animate-in fade-in duration-200"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
       onClick={onClose}
     >
       <div
         id="legal-modal-card"
-        className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-2xl max-w-2xl w-full max-h-[85vh] flex flex-col overflow-hidden font-sans"
+        className="bg-[var(--bg)] border border-[var(--border)] rounded-[8px] shadow-xl max-w-2xl w-full max-h-[85vh] flex flex-col overflow-hidden text-[13px]"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="p-3.5 sm:p-5 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between gap-2 bg-zinc-50/80 dark:bg-zinc-950/60">
-          <div className="flex items-center gap-2 flex-wrap">
-            <h2 className="text-sm sm:text-base font-bold text-zinc-900 dark:text-zinc-100 font-display">
-              {activeDoc === "privacy" && "Privacy Policy"}
-              {activeDoc === "terms" && "Terms of Service"}
-              {activeDoc === "refunds" && "Refund & Cancellation Policy"}
-            </h2>
-            <span className="px-2 py-0.5 text-[9px] sm:text-[10px] font-mono font-medium bg-amber-500/10 text-amber-800 dark:text-amber-300 rounded-md border border-amber-500/20">
-              compliance
-            </span>
-          </div>
+        <div className="p-4 border-b border-[var(--border)] flex items-center justify-between gap-2 bg-[var(--surface)]">
+          <h2 className="text-[16px] font-semibold text-[var(--text)]">
+            {activeDoc === "privacy" && "Privacy Policy"}
+            {activeDoc === "terms" && "Terms of Service"}
+            {activeDoc === "refunds" && "Refund & Cancellation Policy"}
+          </h2>
           <button
             id="close-legal-modal-btn"
+            type="button"
             onClick={onClose}
-            className="p-1.5 rounded-xl border border-zinc-200 dark:border-zinc-800 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer shrink-0"
+            className="p-1 rounded-[6px] border border-[var(--border)] bg-[var(--bg)] text-[var(--muted)] hover:text-[var(--text)] cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
-        <div className="p-4 sm:p-6 overflow-y-auto text-xs text-zinc-600 dark:text-zinc-300 space-y-4 leading-relaxed font-sans">
+        <div className="p-5 overflow-y-auto text-[13px] text-[var(--muted)] space-y-4 leading-relaxed">
           {activeDoc === "privacy" && (
             <>
-              <p className="font-bold text-zinc-900 dark:text-zinc-100 text-sm font-display">
-                1. Information We Collect and Zero-Data-Leaking Architecture
+              <p className="font-semibold text-[var(--text)] text-[14px]">
+                1. Information We Collect and Client-Side Processing
               </p>
               <p>
                 Slowgres processes PostgreSQL execution plans provided by you via EXPLAIN (ANALYZE, FORMAT JSON).
                 Query execution plans and SQL strings can contain proprietary schema metadata and data values.
                 Our analysis engine executes 100% client-side in your browser. We do not share, sell, or transmit query plans or customer data to external advertisement networks or remote servers.
               </p>
-              <p className="font-bold text-zinc-900 dark:text-zinc-100 text-sm font-display">
-                2. Philippine Data Privacy Act & GDPR Compliance
+              <p className="font-semibold text-[var(--text)] text-[14px]">
+                2. Data Privacy & Local Browser Storage
               </p>
               <p>
-                We comply with Republic Act No. 10173 (Philippine Data Privacy Act of 2012) and the EU General Data
-                Protection Regulation (GDPR). Users retain the right to delete their saved analyses at any time directly through the local browser storage controls.
-              </p>
-              <p className="italic text-zinc-400 text-[11px]">
-                Status: Compliance document for merchant-of-record onboarding.
+                Analyses are stored exclusively in your local browser storage. Users retain the right to delete their saved analyses at any time directly through the local browser storage controls or the in-app History view.
               </p>
             </>
           )}
 
           {activeDoc === "terms" && (
             <>
-              <p className="font-bold text-zinc-900 dark:text-zinc-100 text-sm font-display">
+              <p className="font-semibold text-[var(--text)] text-[14px]">
                 1. Acceptance of Terms
               </p>
               <p>
-                By accessing or using Slowgres, you agree to these Terms of Service. Slowgres provides database
-                performance diagnostics and heuristic index suggestions. All recommendations are suggestions
-                and must be verified by the user before executing in production databases.
+                By accessing and using Slowgres, you accept and agree to be bound by these terms. Slowgres is a developer diagnostic tool designed to provide rule-based recommendations for PostgreSQL query execution plans.
               </p>
-              <p className="font-bold text-zinc-900 dark:text-zinc-100 text-sm font-display">
-                2. Permitted Use & Quotas
+              <p className="font-semibold text-[var(--text)] text-[14px]">
+                2. Index Recommendations Disclaimer
               </p>
               <p>
-                Free accounts are subject to daily analysis rate limits and payload boundaries. Automated scraping
-                or attempting to bypass entitlements is strictly prohibited.
-              </p>
-              <p className="italic text-zinc-400 text-[11px]">
-                Status: Compliance document for merchant-of-record onboarding.
+                Suggested index DDL is advisory only. You are solely responsible for testing and evaluating suggested indexes in a staging environment before applying them to production systems.
               </p>
             </>
           )}
 
           {activeDoc === "refunds" && (
             <>
-              <p className="font-bold text-zinc-900 dark:text-zinc-100 text-sm font-display">
-                1. Subscription Cancellation
+              <p className="font-semibold text-[var(--text)] text-[14px]">
+                1. Pro Subscription Billing
               </p>
               <p>
-                You may cancel your paid subscription at any time via the self-service Customer Portal.
-                Upon cancellation, your subscription will remain active until the end of the current billing period,
-                after which your account will transition to the Free tier.
+                Slowgres Pro subscriptions are billed monthly or annually. You may cancel your subscription at any time.
               </p>
-              <p className="font-bold text-zinc-900 dark:text-zinc-100 text-sm font-display">
-                2. Refund Policy
+              <p className="font-semibold text-[var(--text)] text-[14px]">
+                2. 14-Day Refund Window
               </p>
               <p>
-                Due to the immediate provisioning of compute resources, subscriptions are generally non-refundable
-                once a billing period commences, except where mandated by applicable consumer protection laws.
-              </p>
-              <p className="italic text-zinc-400 text-[11px]">
-                Status: Compliance document for merchant-of-record onboarding.
+                If you are unsatisfied with Slowgres Pro within 14 days of your initial purchase, contact support to request a full refund.
               </p>
             </>
           )}
         </div>
 
-        <div className="p-4 border-t border-zinc-200 dark:border-zinc-800 bg-zinc-50/80 dark:bg-zinc-950/60 flex justify-end">
+        <div className="p-3 border-t border-[var(--border)] bg-[var(--surface)] flex justify-end">
           <button
-            id="dismiss-legal-modal-btn"
+            type="button"
             onClick={onClose}
-            className="px-5 py-2 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 text-xs font-bold font-display rounded-xl hover:bg-zinc-800 dark:hover:bg-white transition-all cursor-pointer shadow-sm"
+            className="h-[32px] px-3 rounded-[6px] border border-[var(--border)] bg-[var(--bg)] text-[var(--text)] hover:border-[var(--text)] text-[12px] font-medium cursor-pointer"
           >
             Close
           </button>

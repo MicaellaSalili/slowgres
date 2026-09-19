@@ -1,0 +1,91 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidUserProfile(data) {
+      return data.keys().hasAll(['uid', 'email', 'plan']) &&
+             data.keys().hasOnly(['uid', 'email', 'displayName', 'photoURL', 'plan', 'dailyQuotaUsed', 'lastQuotaDate', 'createdAt', 'updatedAt']) &&
+             data.uid is string && data.uid == request.auth.uid &&
+             data.email is string && data.email.size() <= 256 &&
+             data.plan in ['free', 'premium'] &&
+             (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 128)) &&
+             (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() <= 1024)) &&
+             (!('dailyQuotaUsed' in data) || (data.dailyQuotaUsed is number && data.dailyQuotaUsed >= 0)) &&
+             (!('lastQuotaDate' in data) || (data.lastQuotaDate is string && data.lastQuotaDate.size() <= 32)) &&
+             (!('createdAt' in data) || (data.createdAt is string && data.createdAt.size() <= 64)) &&
+             (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64));
+    }
+
+    function isValidSavedAnalysis(data, userId) {
+      return data.keys().hasAll(['id', 'userId', 'title', 'total_time_ms', 'findings_count', 'created_at', 'analysis_json']) &&
+             data.keys().hasOnly(['id', 'userId', 'title', 'query_text', 'total_time_ms', 'planning_time_ms', 'findings_count', 'critical_count', 'created_at', 'analysis_json']) &&
+             data.id is string && data.id.size() <= 128 &&
+             data.userId is string && data.userId == userId && data.userId == request.auth.uid &&
+             data.title is string && data.title.size() <= 256 &&
+             data.total_time_ms is number && data.total_time_ms >= 0 &&
+             data.findings_count is number && data.findings_count >= 0 &&
+             data.created_at is string && data.created_at.size() <= 64 &&
+             data.analysis_json is string && data.analysis_json.size() <= 2097152 &&
+             (!('query_text' in data) || (data.query_text is string && data.query_text.size() <= 100000)) &&
+             (!('planning_time_ms' in data) || (data.planning_time_ms is number && data.planning_time_ms >= 0)) &&
+             (!('critical_count' in data) || (data.critical_count is number && data.critical_count >= 0));
+    }
+
+    // Health check / connection test document
+    match /test/connection {
+      allow read: if true;
+    }
+
+    // User profiles
+    match /users/{userId} {
+      allow get: if isOwner(userId);
+      allow list: if false;
+
+      allow create: if isOwner(userId) &&
+                       isValidId(userId) &&
+                       isValidUserProfile(request.resource.data);
+
+      allow update: if isOwner(userId) &&
+                       isValidId(userId) &&
+                       isValidUserProfile(request.resource.data) &&
+                       request.resource.data.uid == resource.data.uid;
+
+      allow delete: if isOwner(userId) && isValidId(userId);
+
+      // User saved analyses subcollection
+      match /analyses/{analysisId} {
+        allow get: if isOwner(userId) && isValidId(analysisId);
+        allow list: if isOwner(userId);
+
+        allow create: if isOwner(userId) &&
+                         isValidId(analysisId) &&
+                         isValidSavedAnalysis(request.resource.data, userId);
+
+        allow update: if isOwner(userId) &&
+                         isValidId(analysisId) &&
+                         isValidSavedAnalysis(request.resource.data, userId) &&
+                         request.resource.data.id == resource.data.id &&
+                         request.resource.data.userId == resource.data.userId &&
+                         request.resource.data.created_at == resource.data.created_at;
+
+        allow delete: if isOwner(userId) && isValidId(analysisId);
+      }
+    }
+  }
+}

@@ -1,22 +1,6 @@
-import React, { useState, useMemo } from "react";
-import {
-  ChevronDown,
-  ChevronRight,
-  Clock,
-  Layers,
-  AlertTriangle,
-  AlertOctagon,
-  Info,
-  Maximize2,
-  Database,
-  Filter,
-  Search,
-  ChevronsUpDown,
-  ChevronsDownUp,
-  Cpu,
-  Flame,
-} from "lucide-react";
-import { Finding, PlanNodeData, Severity } from "../types/engine";
+import React, { useState } from "react";
+import { ChevronDown, ChevronRight } from "lucide-react";
+import { Finding, PlanNodeData } from "../types/engine";
 
 interface PlanTreeProps {
   root: PlanNodeData;
@@ -25,321 +9,145 @@ interface PlanTreeProps {
   onSelectNode: (node: PlanNodeData) => void;
 }
 
-interface TreeNodeProps {
+interface TreeRowProps {
   node: PlanNodeData;
+  depth: number;
   totalTimeMs: number;
   findingsByPath: Record<string, Finding[]>;
   onSelectNode: (node: PlanNodeData) => void;
-  depth?: number;
-  isLastChild?: boolean;
-  searchFilter: string;
-  bottlenecksOnly: boolean;
-  forceExpand?: boolean;
+  collapsedPaths: Set<string>;
+  onToggleCollapse: (path: string) => void;
 }
 
-const TreeNode: React.FC<TreeNodeProps> = ({
+const TreeRow: React.FC<TreeRowProps> = ({
   node,
+  depth,
   totalTimeMs,
   findingsByPath,
   onSelectNode,
-  depth = 0,
-  isLastChild = false,
-  searchFilter,
-  bottlenecksOnly,
-  forceExpand,
+  collapsedPaths,
+  onToggleCollapse,
 }) => {
-  const [collapsed, setCollapsed] = useState<boolean>(false);
   const children = node.plans || [];
   const hasChildren = children.length > 0;
+  const isCollapsed = collapsedPaths.has(node.node_path);
   const nodeFindings = findingsByPath[node.node_path] || [];
 
-  // Determine critical / warning flags
   const hasCritical = nodeFindings.some((f) => f.severity === "critical");
   const hasWarning = nodeFindings.some((f) => f.severity === "warning");
-  const isBottleneck = hasCritical || hasWarning || (totalTimeMs > 0 && (node.self_time / totalTimeMs) > 0.2);
 
-  // Filter matching
-  const matchesSearch = useMemo(() => {
-    if (!searchFilter) return true;
-    const term = searchFilter.toLowerCase();
-    return (
-      node.node_type.toLowerCase().includes(term) ||
-      (node.relation_name && node.relation_name.toLowerCase().includes(term)) ||
-      (node.index_name && node.index_name.toLowerCase().includes(term)) ||
-      (node.filter && node.filter.toLowerCase().includes(term))
-    );
-  }, [node, searchFilter]);
-
-  if (bottlenecksOnly && !isBottleneck && nodeFindings.length === 0) {
-    // If bottlenecks only is toggled, only show if this node or its children have bottlenecks
-    const hasBottleneckChild = (children: PlanNodeData[]): boolean => {
-      return children.some(
-        (c) =>
-          findingsByPath[c.node_path]?.length > 0 ||
-          (totalTimeMs > 0 && (c.self_time / totalTimeMs) > 0.2) ||
-          (c.plans && hasBottleneckChild(c.plans))
-      );
-    };
-    if (!hasBottleneckChild(children)) {
-      return null;
-    }
-  }
-
-  // Time metrics
-  const selfTimePct = totalTimeMs > 0 ? (node.self_time / totalTimeMs) * 100 : 0;
-  const totalTimePct = totalTimeMs > 0 ? (node.total_actual_time / totalTimeMs) * 100 : 0;
-
-  // Row misestimate check
-  let estimateMismatchTag: React.ReactNode = null;
-  if (node.actual_rows !== undefined && node.plan_rows > 0) {
-    const factor =
-      node.actual_rows > node.plan_rows
-        ? node.actual_rows / Math.max(1, node.plan_rows)
-        : node.plan_rows / Math.max(1, node.actual_rows);
-    if (factor >= 10 && Math.max(node.actual_rows, node.plan_rows) >= 500) {
-      const isUnder = node.actual_rows > node.plan_rows;
-      estimateMismatchTag = (
-        <span
-          className={`px-2 py-0.5 rounded-md text-[10px] font-mono font-semibold inline-flex items-center gap-1 ${
-            factor >= 100
-              ? "bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-300/80 dark:border-rose-800"
-              : "bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-300/80 dark:border-amber-800"
-          }`}
-          title={`Planner estimated ${node.plan_rows.toLocaleString()} rows vs actual ${node.actual_rows.toLocaleString()} rows (${factor.toFixed(1)}x difference)`}
-        >
-          <span>{factor.toFixed(0)}x</span>
-          <span>{isUnder ? "under-estimate" : "over-estimate"}</span>
-        </span>
-      );
-    }
-  }
-
-  // Node type styling badge
-  const getNodeBadgeClass = () => {
-    if (hasCritical) {
-      return "bg-rose-500/10 text-rose-700 dark:text-rose-400 border-rose-500/30";
-    }
-    if (hasWarning) {
-      return "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30";
-    }
-    if (node.node_type.includes("Scan")) {
-      return "bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/30";
-    }
-    if (node.node_type.includes("Join") || node.node_type.includes("Loop")) {
-      return "bg-purple-500/10 text-purple-700 dark:text-purple-400 border-purple-500/30";
-    }
-    if (node.node_type.includes("Sort") || node.node_type.includes("Aggregate")) {
-      return "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30";
-    }
-    return "bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border-zinc-200 dark:border-zinc-700";
-  };
-
-  const isHighlighted = searchFilter && matchesSearch;
+  const timePct = totalTimeMs > 0 ? (node.total_actual_time / totalTimeMs) * 100 : 0;
 
   return (
-    <div className="relative text-xs">
-      {/* Visual connector branch line if nested */}
-      {depth > 0 && (
-        <div
-          className="absolute left-0 top-0 bottom-0 border-l border-zinc-200 dark:border-zinc-800 hidden sm:block"
-          style={{ left: `${(depth - 1) * 20 + 12}px` }}
-        />
-      )}
-
+    <>
       <div
-        id={`plan-node-${node.node_path.replace(/\./g, "-")}`}
+        id={`tree-row-${node.node_path.replace(/\./g, "-")}`}
         onClick={() => onSelectNode(node)}
-        className={`group relative flex items-start gap-2 p-2.5 sm:p-3 rounded-xl border my-1.5 transition-all duration-150 cursor-pointer ${
-          isHighlighted
-            ? "ring-2 ring-amber-500 dark:ring-amber-400 shadow-md"
-            : ""
-        } ${
-          hasCritical
-            ? "border-rose-300 dark:border-rose-900/80 bg-rose-50/40 dark:bg-rose-950/20 hover:bg-rose-50/80 dark:hover:bg-rose-950/35"
-            : hasWarning
-            ? "border-amber-300 dark:border-amber-900/80 bg-amber-50/40 dark:bg-amber-950/20 hover:bg-amber-50/80 dark:hover:bg-amber-950/35"
-            : "border-zinc-200 dark:border-zinc-800/80 bg-white dark:bg-zinc-900 hover:border-zinc-300 dark:hover:border-zinc-700 hover:bg-zinc-50/80 dark:hover:bg-zinc-800/60 shadow-2xs"
-        }`}
-        style={{
-          marginLeft: `${Math.min(depth * 14, 70)}px`,
-        }}
+        className="flex items-center text-[13px] border-b border-[var(--border)] last:border-b-0 hover:bg-[var(--surface)] cursor-pointer transition-colors py-2 px-3 group"
       >
-        {/* Collapse toggle */}
-        {hasChildren ? (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              setCollapsed(!collapsed);
-            }}
-            className="p-1 rounded-md text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 mt-0.5 transition-colors"
-          >
-            {collapsed ? (
-              <ChevronRight className="w-3.5 h-3.5" />
-            ) : (
-              <ChevronDown className="w-3.5 h-3.5" />
-            )}
-          </button>
-        ) : (
-          <div className="w-4 sm:w-5 shrink-0 flex items-center justify-center mt-1">
-            <span className="w-1.5 h-1.5 rounded-full bg-zinc-300 dark:bg-zinc-700" />
-          </div>
-        )}
-
-        {/* Node content block */}
-        <div className="flex-1 min-w-0">
-          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mb-1.5">
-            {/* Node type badge */}
-            <span
-              className={`px-2 sm:px-2.5 py-0.5 rounded-md text-xs font-bold font-display border ${getNodeBadgeClass()}`}
+        {/* Node type & relation */}
+        <div
+          className="flex-1 flex items-center gap-1.5 min-w-0 pr-3"
+          style={{ paddingLeft: `${depth * 16}px` }}
+        >
+          {hasChildren ? (
+            <button
+              type="button"
+              aria-label={isCollapsed ? "Expand node" : "Collapse node"}
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleCollapse(node.node_path);
+              }}
+              className="p-0.5 rounded text-[var(--muted)] hover:text-[var(--text)] cursor-pointer"
             >
-              {node.node_type}
+              {isCollapsed ? (
+                <ChevronRight className="w-3.5 h-3.5" />
+              ) : (
+                <ChevronDown className="w-3.5 h-3.5" />
+              )}
+            </button>
+          ) : (
+            <span className="w-3.5 inline-block" />
+          )}
+
+          <span className="font-mono text-[13px] font-medium text-[var(--text)] truncate">
+            {node.node_type}
+          </span>
+
+          {node.relation_name && (
+            <span className="text-[var(--muted)] truncate">
+              on <span className="font-mono text-[var(--text)]">{node.relation_name}</span>
             </span>
+          )}
 
-            {/* Target relation/index */}
-            {node.relation_name && (
-              <span className="font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-1 font-sans text-xs">
-                <Database className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
-                <span className="truncate max-w-[120px] sm:max-w-none">{node.relation_name}</span>
-                {node.alias && node.alias !== node.relation_name && (
-                  <span className="text-zinc-400 font-normal">({node.alias})</span>
-                )}
-              </span>
-            )}
+          {node.index_name && (
+            <span className="text-[var(--muted)] text-[12px] truncate hidden md:inline">
+              using <span className="font-mono">{node.index_name}</span>
+            </span>
+          )}
 
-            {node.index_name && (
-              <span className="text-zinc-500 dark:text-zinc-400 font-mono text-[10px] sm:text-[11px] bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded border border-zinc-200/60 dark:border-zinc-700/60 truncate max-w-[140px] sm:max-w-none">
-                index: {node.index_name}
-              </span>
-            )}
+          {/* Finding indicator */}
+          {hasCritical && (
+            <span
+              className="px-1 py-0.2 text-[10px] font-mono font-medium rounded bg-[#DC2626]/10 text-[#DC2626] border border-[#DC2626]/30 ml-1 shrink-0"
+              title="Critical issue detected on this node"
+            >
+              critical
+            </span>
+          )}
+          {!hasCritical && hasWarning && (
+            <span
+              className="px-1 py-0.2 text-[10px] font-mono font-medium rounded bg-[#D97706]/10 text-[#D97706] border border-[#D97706]/30 ml-1 shrink-0"
+              title="Warning issue detected on this node"
+            >
+              warning
+            </span>
+          )}
+        </div>
 
-            {/* Row misestimate pill */}
-            {estimateMismatchTag}
-
-            {/* High self-time flame badge */}
-            {selfTimePct >= 30 && (
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800">
-                <Flame className="w-3 h-3 text-amber-600 dark:text-amber-400 fill-current" />
-                <span>{selfTimePct.toFixed(0)}% runtime</span>
-              </span>
-            )}
-
-            {/* Rule warning badges */}
-            {nodeFindings.map((f, idx) => (
-              <span
-                key={idx}
-                className={`flex items-center gap-1 px-1.5 sm:px-2 py-0.5 rounded-md text-[10px] font-bold font-mono ${
-                  f.severity === "critical"
-                    ? "bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300 border border-rose-300 dark:border-rose-800"
-                    : "bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-800"
-                }`}
-              >
-                {f.severity === "critical" ? (
-                  <AlertOctagon className="w-3 h-3 text-rose-600 dark:text-rose-400 shrink-0" />
-                ) : (
-                  <AlertTriangle className="w-3 h-3 text-amber-600 dark:text-amber-400 shrink-0" />
-                )}
-                <span>{f.rule_id}</span>
-              </span>
-            ))}
+        {/* Actual Time */}
+        <div className="w-[120px] sm:w-[140px] text-right font-mono tabular-nums text-[12px] text-[var(--text)] shrink-0 pr-4">
+          <div>{node.total_actual_time.toFixed(2)} ms</div>
+          {/* Thin inline time bar in muted tone */}
+          <div className="w-full h-[3px] bg-[var(--border)] rounded-full overflow-hidden mt-1">
+            <div
+              className="h-full bg-[var(--muted)]"
+              style={{ width: `${Math.min(100, Math.max(3, timePct))}%` }}
+            />
           </div>
+        </div>
 
-          {/* Secondary metadata row (Filter, loops, rows) */}
-          <div className="flex flex-wrap items-center gap-x-3 sm:gap-x-4 gap-y-1 text-[10px] sm:text-[11px] text-zinc-500 dark:text-zinc-400 font-sans">
-            {node.actual_rows !== undefined && (
-              <span>
-                Actual Rows:{" "}
-                <strong className="text-zinc-800 dark:text-zinc-200 font-mono">
-                  {node.actual_rows.toLocaleString()}
-                </strong>
-                {node.actual_loops > 1 && (
-                  <span className="font-mono text-zinc-400">
-                    {" "}
-                    (×{node.actual_loops.toLocaleString()} loops)
-                  </span>
-                )}
-              </span>
-            )}
-
-            {node.rows_removed_by_filter !== undefined && (
-              <span className="text-rose-600 dark:text-rose-400 flex items-center gap-1 font-medium">
-                <Filter className="w-3 h-3 shrink-0" />
-                <span>
-                  {node.rows_removed_by_filter.toLocaleString()} discarded
-                </span>
-              </span>
-            )}
-
-            {node.filter && (
-              <span
-                className="font-mono text-[10px] text-zinc-400 dark:text-zinc-500 truncate max-w-[200px] sm:max-w-sm"
-                title={node.filter}
-              >
-                filter: {node.filter}
-              </span>
-            )}
-          </div>
-
-          {/* Visual self-time bar */}
-          {node.self_time > 0 && totalTimeMs > 0 && (
-            <div className="mt-2 sm:mt-2.5 flex items-center gap-2 sm:gap-2.5 flex-wrap">
-              <div className="w-20 sm:w-32 h-1.5 bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden shrink-0">
-                <div
-                  className={`h-full rounded-full transition-all duration-300 ${
-                    selfTimePct > 50
-                      ? "bg-rose-500"
-                      : selfTimePct > 20
-                      ? "bg-amber-500"
-                      : "bg-blue-500"
-                  }`}
-                  style={{ width: `${Math.min(100, Math.max(4, selfTimePct))}%` }}
-                />
-              </div>
-              <span className="text-[10px] font-mono text-zinc-400">
-                Self-Time:{" "}
-                <strong className="text-zinc-800 dark:text-zinc-200">
-                  {node.self_time.toFixed(2)} ms
-                </strong>{" "}
-                ({selfTimePct.toFixed(1)}%)
-              </span>
+        {/* Rows */}
+        <div className="w-[80px] sm:w-[100px] text-right font-mono tabular-nums text-[12px] text-[var(--text)] shrink-0 pr-4">
+          <div>{node.actual_rows !== undefined ? node.actual_rows.toLocaleString() : "-"}</div>
+          {node.plan_rows !== undefined && node.actual_rows !== undefined && (
+            <div className="text-[10px] text-[var(--muted)]">
+              est: {node.plan_rows.toLocaleString()}
             </div>
           )}
         </div>
 
-        {/* Node detail inspect button (visible on mobile, hover on desktop) */}
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            onSelectNode(node);
-          }}
-          className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 p-1.5 rounded-lg text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all cursor-pointer shrink-0"
-          title="Inspect full PostgreSQL node metrics"
-        >
-          <Maximize2 className="w-3.5 h-3.5" />
-        </button>
+        {/* Loops */}
+        <div className="w-[50px] sm:w-[60px] text-right font-mono tabular-nums text-[12px] text-[var(--muted)] shrink-0">
+          {node.actual_loops || 1}
+        </div>
       </div>
 
-      {/* Recursive children rendering */}
-      {!collapsed && hasChildren && (
-        <div className="relative">
-          {children.map((child, idx) => (
-            <TreeNode
-              key={idx}
-              node={child}
-              totalTimeMs={totalTimeMs}
-              findingsByPath={findingsByPath}
-              onSelectNode={onSelectNode}
-              depth={depth + 1}
-              isLastChild={idx === children.length - 1}
-              searchFilter={searchFilter}
-              bottlenecksOnly={bottlenecksOnly}
-              forceExpand={forceExpand}
-            />
-          ))}
-        </div>
-      )}
-    </div>
+      {/* Children */}
+      {!isCollapsed &&
+        children.map((child) => (
+          <TreeRow
+            key={child.node_path}
+            node={child}
+            depth={depth + 1}
+            totalTimeMs={totalTimeMs}
+            findingsByPath={findingsByPath}
+            onSelectNode={onSelectNode}
+            collapsedPaths={collapsedPaths}
+            onToggleCollapse={onToggleCollapse}
+          />
+        ))}
+    </>
   );
 };
 
@@ -349,66 +157,89 @@ export const PlanTree: React.FC<PlanTreeProps> = ({
   findings,
   onSelectNode,
 }) => {
-  const [searchFilter, setSearchFilter] = useState<string>("");
-  const [bottlenecksOnly, setBottlenecksOnly] = useState<boolean>(false);
+  const [collapsedPaths, setCollapsedPaths] = useState<Set<string>>(new Set());
 
-  // Index findings by node path for O(1) lookup
-  const findingsByPath: Record<string, Finding[]> = {};
-  for (const f of findings) {
-    if (!findingsByPath[f.node_path]) {
-      findingsByPath[f.node_path] = [];
-    }
-    findingsByPath[f.node_path].push(f);
-  }
+  const findingsByPath = React.useMemo(() => {
+    const map: Record<string, Finding[]> = {};
+    findings.forEach((f) => {
+      if (!map[f.node_path]) map[f.node_path] = [];
+      map[f.node_path].push(f);
+    });
+    return map;
+  }, [findings]);
+
+  const toggleCollapse = (path: string) => {
+    setCollapsedPaths((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) {
+        next.delete(path);
+      } else {
+        next.add(path);
+      }
+      return next;
+    });
+  };
+
+  const collapseAll = () => {
+    const paths = new Set<string>();
+    const collect = (n: PlanNodeData) => {
+      if (n.plans && n.plans.length > 0) {
+        paths.add(n.node_path);
+        n.plans.forEach(collect);
+      }
+    };
+    collect(root);
+    setCollapsedPaths(paths);
+  };
+
+  const expandAll = () => {
+    setCollapsedPaths(new Set());
+  };
 
   return (
-    <div id="plan-tree-view" className="space-y-3">
-      {/* Header and Controls */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+    <div id="plan-tree-container" className="space-y-2">
+      <div className="flex items-center justify-between">
+        <h3 className="text-[14px] font-semibold text-[var(--text)]">
+          Execution plan tree
+        </h3>
         <div className="flex items-center gap-2">
-          <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-600 dark:text-zinc-400 flex items-center gap-1.5 font-display">
-            <Layers className="w-4 h-4 text-amber-500 shrink-0" />
-            <span className="truncate">Plan Hierarchy & Self-Time</span>
-          </h3>
-        </div>
-
-        {/* Tree search and quick filter */}
-        <div className="flex items-center gap-2 text-xs w-full sm:w-auto">
-          <div className="relative flex-1 sm:flex-initial">
-            <Search className="w-3.5 h-3.5 text-zinc-400 absolute left-2.5 top-2" />
-            <input
-              type="text"
-              value={searchFilter}
-              onChange={(e) => setSearchFilter(e.target.value)}
-              placeholder="Filter nodes..."
-              className="pl-8 pr-3 py-1 text-xs rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-800 dark:text-zinc-200 placeholder-zinc-400 focus:outline-none focus:ring-1 focus:ring-zinc-400 w-full sm:w-48 font-sans"
-            />
-          </div>
-
           <button
             type="button"
-            onClick={() => setBottlenecksOnly(!bottlenecksOnly)}
-            className={`px-2.5 py-1 rounded-lg border text-xs font-medium flex items-center gap-1 transition-colors cursor-pointer shrink-0 ${
-              bottlenecksOnly
-                ? "bg-amber-500/10 border-amber-500/40 text-amber-800 dark:text-amber-300"
-                : "border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800"
-            }`}
+            onClick={expandAll}
+            className="text-[12px] text-[var(--muted)] hover:text-[var(--text)] cursor-pointer"
           >
-            <Flame className="w-3 h-3 text-amber-500" />
-            <span>Bottlenecks Only</span>
+            Expand all
+          </button>
+          <span className="text-[var(--border)]">·</span>
+          <button
+            type="button"
+            onClick={collapseAll}
+            className="text-[12px] text-[var(--muted)] hover:text-[var(--text)] cursor-pointer"
+          >
+            Collapse all
           </button>
         </div>
       </div>
 
-      <div className="bg-zinc-50/60 dark:bg-zinc-950/40 p-2 sm:p-3 rounded-2xl border border-zinc-200 dark:border-zinc-800 overflow-x-auto">
-        <div className="min-w-[400px] sm:min-w-0">
-          <TreeNode
+      <div className="rounded-[8px] border border-[var(--border)] bg-[var(--bg)] overflow-x-auto">
+        {/* Table Header */}
+        <div className="flex items-center text-[11px] font-medium text-[var(--muted)] border-b border-[var(--border)] bg-[var(--surface)] py-2 px-3 uppercase tracking-wider">
+          <div className="flex-1">Node & Relation</div>
+          <div className="w-[120px] sm:w-[140px] text-right pr-4">Actual Time</div>
+          <div className="w-[80px] sm:w-[100px] text-right pr-4">Rows</div>
+          <div className="w-[50px] sm:w-[60px] text-right">Loops</div>
+        </div>
+
+        {/* Tree Rows */}
+        <div className="divide-y divide-[var(--border)]">
+          <TreeRow
             node={root}
+            depth={0}
             totalTimeMs={totalTimeMs}
             findingsByPath={findingsByPath}
             onSelectNode={onSelectNode}
-            searchFilter={searchFilter}
-            bottlenecksOnly={bottlenecksOnly}
+            collapsedPaths={collapsedPaths}
+            onToggleCollapse={toggleCollapse}
           />
         </div>
       </div>

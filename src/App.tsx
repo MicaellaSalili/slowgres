@@ -1,18 +1,26 @@
 import React, { useState, useEffect } from "react";
 import {
-  Zap,
-  Clock,
-  Layers,
-  Download,
-  Share2,
-  FileText,
-  RotateCcw,
-  CheckCircle2,
-  Database,
-  ShieldCheck,
-  Code2,
-  Mail,
-} from "lucide-react";
+  Finding,
+  PlanAnalysis,
+  PlanNodeData,
+  SavedAnalysis,
+  Entitlements,
+  UserAccount,
+} from "./types/engine";
+import { parsePlanJson, formatMarkdownReport, findNodeByPath } from "./lib/engine";
+import {
+  auth,
+  testFirestoreConnection,
+  syncUserProfile,
+  updateUserQuotaInFirestore,
+  updateUserPlanInFirestore,
+  saveAnalysisToFirestore,
+  deleteAnalysisFromFirestore,
+  clearAllAnalysesFromFirestore,
+  subscribeToUserAnalyses,
+  signOutFirebase,
+} from "./lib/firebase";
+import { onAuthStateChanged } from "firebase/auth";
 import { Header } from "./components/Header";
 import { PlanInput } from "./components/PlanInput";
 import { PlanTree } from "./components/PlanTree";
@@ -21,30 +29,31 @@ import { NodeDetailModal } from "./components/NodeDetailModal";
 import { HistoryDrawer } from "./components/HistoryDrawer";
 import { UpgradeModal } from "./components/UpgradeModal";
 import { LegalModal, LegalDocType } from "./components/LegalViews";
-import { AdSlot } from "./components/AdSlot";
 import { AuthModal } from "./components/AuthModal";
-import {
-  Entitlements,
-  PlanAnalysis,
-  PlanNodeData,
-  SavedAnalysis,
-  UserAccount,
-} from "./types/engine";
-import { formatMarkdownReport, parsePlanJson, findNodeByPath } from "./lib/engine";
-import { SAMPLE_PLANS } from "./lib/samplePlans";
 
+// Local storage keys for offline/guest fallback
+const LOCAL_STORAGE_THEME_KEY = "slowgres_theme_v1";
 const LOCAL_STORAGE_HISTORY_KEY = "slowgres_analyses_v1";
 const LOCAL_STORAGE_QUOTA_KEY = "slowgres_quota_v1";
-const LOCAL_STORAGE_THEME_KEY = "slowgres_theme_v1";
-const LOCAL_STORAGE_USER_KEY = "slowgres_user_session_v1";
+const LOCAL_STORAGE_USER_KEY = "slowgres_user_v1";
 
-export default function App() {
-  // User authentication state
+export const App: React.FC = () => {
+  // Theme state
+  const [darkMode, setDarkMode] = useState<boolean>(() => {
+    const saved = localStorage.getItem(LOCAL_STORAGE_THEME_KEY);
+    if (saved) return saved === "dark";
+    return (
+      window.matchMedia &&
+      window.matchMedia("(prefers-color-scheme: dark)").matches
+    );
+  });
+
+  // User auth state
   const [user, setUser] = useState<UserAccount | null>(() => {
-    const raw = localStorage.getItem(LOCAL_STORAGE_USER_KEY);
-    if (raw) {
+    const saved = localStorage.getItem(LOCAL_STORAGE_USER_KEY);
+    if (saved) {
       try {
-        return JSON.parse(raw);
+        return JSON.parse(saved);
       } catch (e) {
         return null;
       }
@@ -52,70 +61,50 @@ export default function App() {
     return null;
   });
 
-  // Auth modal controls
-  const [isAuthOpen, setIsAuthOpen] = useState<boolean>(false);
-  const [authMode, setAuthMode] = useState<"login" | "signup">("signup");
-
-  // Theme state
-  const [darkMode, setDarkMode] = useState<boolean>(() => {
-    const saved = localStorage.getItem(LOCAL_STORAGE_THEME_KEY);
-    return saved ? saved === "dark" : false;
-  });
-
-  // Entitlements & quotas
+  // Quota & entitlements state
   const [entitlements, setEntitlements] = useState<Entitlements>(() => {
     const today = new Date().toISOString().split("T")[0];
-    const raw = localStorage.getItem(LOCAL_STORAGE_QUOTA_KEY);
-    const storedUser = (() => {
-      try {
-        const u = localStorage.getItem(LOCAL_STORAGE_USER_KEY);
-        return u ? JSON.parse(u) : null;
-      } catch (e) {
-        return null;
-      }
-    })();
-    const baseLimit = storedUser ? 25 : 10;
-    const baseRetention = storedUser ? 30 : 7;
+    const savedQuotaRaw = localStorage.getItem(LOCAL_STORAGE_QUOTA_KEY);
+    let dailyUsed = 0;
 
-    if (raw) {
+    if (savedQuotaRaw) {
       try {
-        const parsed = JSON.parse(raw);
+        const parsed = JSON.parse(savedQuotaRaw);
         if (parsed.date === today) {
-          return {
-            plan: parsed.plan || "free",
-            daily_limit: parsed.plan === "premium" ? 999999 : baseLimit,
-            daily_used: parsed.used || 0,
-            history_retention_days: parsed.plan === "premium" ? 90 : baseRetention,
-            can_export: parsed.plan === "premium",
-            show_ads: parsed.plan !== "premium",
-          };
+          dailyUsed = parsed.used || 0;
         }
       } catch (e) {
-        // ignore
+        dailyUsed = 0;
       }
     }
+
+    const savedUserRaw = localStorage.getItem(LOCAL_STORAGE_USER_KEY);
+    const hasUser = !!savedUserRaw;
+
     return {
       plan: "free",
-      daily_limit: baseLimit,
-      daily_used: 0,
-      history_retention_days: baseRetention,
-      can_export: false,
-      show_ads: true,
+      daily_limit: hasUser ? 25 : 10,
+      daily_used: dailyUsed,
+      history_retention_days: hasUser ? 30 : 7,
+      can_export: true,
+      show_ads: false,
     };
   });
 
-  // Active analysis state
+  // Active analysis results
   const [activeAnalysis, setActiveAnalysis] = useState<PlanAnalysis | null>(null);
   const [activeQuerySql, setActiveQuerySql] = useState<string>("");
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [parseError, setParseError] = useState<string | null>(null);
+  const [copiedExport, setCopiedExport] = useState<boolean>(false);
 
-  // Modal / drawer states
+  // Inspector & modal states
   const [selectedNode, setSelectedNode] = useState<PlanNodeData | null>(null);
   const [isHistoryOpen, setIsHistoryOpen] = useState<boolean>(false);
   const [isUpgradeOpen, setIsUpgradeOpen] = useState<boolean>(false);
+  const [isAuthOpen, setIsAuthOpen] = useState<boolean>(false);
+  const [authMode, setAuthMode] = useState<"login" | "signup">("signup");
   const [legalDoc, setLegalDoc] = useState<LegalDocType>(null);
-  const [copiedExport, setCopiedExport] = useState<boolean>(false);
 
   // History records
   const [savedAnalyses, setSavedAnalyses] = useState<SavedAnalysis[]>(() => {
@@ -130,6 +119,60 @@ export default function App() {
     return [];
   });
 
+  // Test connection to Firestore on initial boot
+  useEffect(() => {
+    testFirestoreConnection();
+  }, []);
+
+  // Listen to Firebase Auth state changes
+  useEffect(() => {
+    const unsubscribeAuth = onAuthStateChanged(auth, async (fbUser) => {
+      if (fbUser) {
+        try {
+          const { user: syncedUser, entitlements: syncedEntitlements } =
+            await syncUserProfile(fbUser);
+          setUser(syncedUser);
+          setEntitlements(syncedEntitlements);
+          localStorage.setItem(LOCAL_STORAGE_USER_KEY, JSON.stringify(syncedUser));
+        } catch (err) {
+          console.error("Failed to sync Firestore user profile:", err);
+        }
+      } else {
+        setUser(null);
+        localStorage.removeItem(LOCAL_STORAGE_USER_KEY);
+        setEntitlements((prev) => ({
+          ...prev,
+          plan: "free",
+          daily_limit: 10,
+          history_retention_days: 7,
+        }));
+      }
+    });
+
+    return () => unsubscribeAuth();
+  }, []);
+
+  // Sync real-time analyses from Firestore when user is signed in
+  useEffect(() => {
+    if (!user?.id) return;
+
+    const unsubscribeFirestore = subscribeToUserAnalyses(
+      user.id,
+      (remoteAnalyses) => {
+        setSavedAnalyses(remoteAnalyses);
+        localStorage.setItem(
+          LOCAL_STORAGE_HISTORY_KEY,
+          JSON.stringify(remoteAnalyses)
+        );
+      },
+      (error) => {
+        console.error("Error listening to user analyses from Firestore:", error);
+      }
+    );
+
+    return () => unsubscribeFirestore();
+  }, [user?.id]);
+
   // Apply dark mode class to HTML root
   useEffect(() => {
     if (darkMode) {
@@ -141,10 +184,12 @@ export default function App() {
     }
   }, [darkMode]);
 
-  // Sync history to localStorage
+  // Sync history to localStorage for guest or cache
   useEffect(() => {
-    localStorage.setItem(LOCAL_STORAGE_HISTORY_KEY, JSON.stringify(savedAnalyses));
-  }, [savedAnalyses]);
+    if (!user) {
+      localStorage.setItem(LOCAL_STORAGE_HISTORY_KEY, JSON.stringify(savedAnalyses));
+    }
+  }, [savedAnalyses, user]);
 
   // Sync quota to localStorage
   useEffect(() => {
@@ -164,11 +209,13 @@ export default function App() {
     setIsLoading(true);
     setParseError(null);
 
-    // Short timeout to allow UI loading state to paint smoothly
-    setTimeout(() => {
+    setTimeout(async () => {
       try {
         // Enforce quota limit for free tier
-        if (entitlements.plan === "free" && entitlements.daily_used >= entitlements.daily_limit) {
+        if (
+          entitlements.plan === "free" &&
+          entitlements.daily_used >= entitlements.daily_limit
+        ) {
           if (!user) {
             handleOpenAuth("signup");
           } else {
@@ -182,20 +229,32 @@ export default function App() {
         setActiveAnalysis(analysis);
         setActiveQuerySql(querySql || "");
 
-        // Increment quota
+        const newUsed = entitlements.daily_used + 1;
+
+        // Increment quota in local state
         setEntitlements((prev) => ({
           ...prev,
-          daily_used: prev.daily_used + 1,
+          daily_used: newUsed,
         }));
 
-        // Save to history
-        const criticalCount = analysis.findings.filter((f) => f.severity === "critical").length;
+        // Persist quota to Firestore if user is authenticated
+        if (user?.id) {
+          updateUserQuotaInFirestore(user.id, newUsed).catch((err) =>
+            console.error("Failed to update quota in Firestore:", err)
+          );
+        }
+
+        // Store analysis record
+        const criticalCount = analysis.findings.filter(
+          (f: Finding) => f.severity === "critical"
+        ).length;
+
         const newRecord: SavedAnalysis = {
-          id: String(Date.now()),
+          id: `rec_${Date.now()}`,
           created_at: new Date().toISOString(),
           title: analysis.root.relation_name
             ? `${analysis.root.node_type} on ${analysis.root.relation_name}`
-            : analysis.root.node_type,
+            : `${analysis.root.node_type} (${analysis.total_time_ms.toFixed(1)} ms)`,
           query_text: querySql,
           total_time_ms: analysis.total_time_ms,
           planning_time_ms: analysis.planning_time_ms,
@@ -204,7 +263,19 @@ export default function App() {
           analysis,
         };
 
-        setSavedAnalyses((prev) => [newRecord, ...prev.slice(0, 49)]);
+        // If authenticated, persist to Firestore
+        if (user?.id) {
+          try {
+            await saveAnalysisToFirestore(user.id, newRecord);
+          } catch (err) {
+            console.error("Failed to save analysis to Firestore:", err);
+            // Still update local state as fallback
+            setSavedAnalyses((prev) => [newRecord, ...prev.slice(0, 49)]);
+          }
+        } else {
+          setSavedAnalyses((prev) => [newRecord, ...prev.slice(0, 49)]);
+        }
+
         setIsLoading(false);
       } catch (err: any) {
         setParseError(err.message || "Failed to analyze execution plan.");
@@ -228,25 +299,62 @@ export default function App() {
     }));
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await signOutFirebase();
+    } catch (err) {
+      console.error("Sign out error:", err);
+    }
     setUser(null);
     localStorage.removeItem(LOCAL_STORAGE_USER_KEY);
     setEntitlements((prev) => ({
       ...prev,
-      daily_limit: prev.plan === "premium" ? 999999 : 10,
-      history_retention_days: prev.plan === "premium" ? 90 : 7,
+      daily_limit: 10,
+      history_retention_days: 7,
     }));
   };
 
-  const handleUpgrade = () => {
-    setEntitlements({
+  const handleUpgrade = async () => {
+    const newEntitlements: Entitlements = {
       plan: "premium",
       daily_limit: 999999,
       daily_used: entitlements.daily_used,
       history_retention_days: 90,
       can_export: true,
       show_ads: false,
-    });
+    };
+    setEntitlements(newEntitlements);
+
+    if (user?.id) {
+      try {
+        await updateUserPlanInFirestore(user.id, "premium");
+        setUser((prev) => (prev ? { ...prev, plan: "premium" } : null));
+      } catch (err) {
+        console.error("Failed to update plan in Firestore:", err);
+      }
+    }
+  };
+
+  const handleDeleteAnalysis = async (id: string) => {
+    if (user?.id) {
+      try {
+        await deleteAnalysisFromFirestore(user.id, id);
+      } catch (err) {
+        console.error("Failed to delete analysis from Firestore:", err);
+      }
+    }
+    setSavedAnalyses((prev) => prev.filter((item) => item.id !== id));
+  };
+
+  const handleClearHistory = async () => {
+    if (user?.id) {
+      try {
+        await clearAllAnalysesFromFirestore(user.id);
+      } catch (err) {
+        console.error("Failed to clear analyses from Firestore:", err);
+      }
+    }
+    setSavedAnalyses([]);
   };
 
   const handleExportMarkdown = () => {
@@ -254,7 +362,7 @@ export default function App() {
     const md = formatMarkdownReport(activeAnalysis, activeQuerySql);
     navigator.clipboard.writeText(md);
     setCopiedExport(true);
-    setTimeout(() => setCopiedExport(false), 2000);
+    setTimeout(() => setCopiedExport(false), 1500);
   };
 
   const handleExportJson = () => {
@@ -270,18 +378,27 @@ export default function App() {
     URL.revokeObjectURL(url);
   };
 
+  const handleSelectNodePath = (nodePath: string) => {
+    if (activeAnalysis) {
+      const target = findNodeByPath(activeAnalysis.root, nodePath);
+      if (target) {
+        setSelectedNode(target);
+      }
+    }
+  };
+
   return (
     <div
       id="slowgres-app"
-      className="min-h-screen bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 flex flex-col font-sans selection:bg-amber-500/20 selection:text-amber-900 dark:selection:text-amber-200 transition-colors duration-200"
+      className="min-h-screen bg-[var(--bg)] text-[var(--text)] flex flex-col font-sans"
     >
-      {/* Navbar */}
+      {/* 1. Header */}
       <Header
         darkMode={darkMode}
         onToggleDarkMode={() => setDarkMode(!darkMode)}
         onOpenHistory={() => setIsHistoryOpen(true)}
         onOpenUpgrade={() => setIsUpgradeOpen(true)}
-        onOpenLegal={(doc) => setLegalDoc(doc)}
+        onResetToAnalyzer={() => {}}
         entitlements={entitlements}
         historyCount={savedAnalyses.length}
         user={user}
@@ -289,267 +406,148 @@ export default function App() {
         onLogout={handleLogout}
       />
 
-      {/* Main Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6">
-        {!activeAnalysis ? (
-          /* Input State View */
-          <div className="space-y-6">
-            {/* Value Proposition Header */}
-            <div className="text-center max-w-3xl mx-auto pt-4 pb-2">
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-900 dark:text-amber-300 text-xs font-semibold mb-4 shadow-2xs">
-                <Zap className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 fill-amber-500" />
-                <span className="font-display">PostgreSQL 12–17 Diagnostic Engine</span>
-              </div>
+      {/* Main container: max-w-[1120px] */}
+      <main className="flex-1 max-w-[1120px] w-full mx-auto px-4 sm:px-6 py-6 sm:py-8">
+        {/* 2. Hero section */}
+        <section className="mb-6">
+          <h1 className="text-[28px] font-semibold text-[var(--text)] tracking-tight font-display">
+            Find out why it&apos;s slow.
+          </h1>
+          <p className="text-[14px] text-[var(--muted)] mt-1.5 leading-relaxed max-w-2xl">
+            Paste EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) output to see findings, row misestimates, and suggested indexes.
+          </p>
+        </section>
 
-              <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-zinc-900 dark:text-zinc-100 font-display">
-                Find out why your query is slow.
-              </h1>
-              <p className="mt-3 text-sm text-zinc-600 dark:text-zinc-400 leading-relaxed font-sans max-w-2xl mx-auto">
-                Paste your <code className="font-mono text-xs bg-zinc-200/80 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 px-1.5 py-0.5 rounded border border-zinc-300/60 dark:border-zinc-700/60 font-semibold">EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)</code> output to instantly pinpoint sequential scans, row misestimates, and disk spills with executable composite index DDL.
-              </p>
-
-              {/* Modern Feature Pills */}
-              <div className="flex flex-wrap items-center justify-center gap-2 mt-4 text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
-                <span className="px-2.5 py-1 rounded-lg bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 flex items-center gap-1.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
-                  Seq Scans & Filter Discards
-                </span>
-                <span className="px-2.5 py-1 rounded-lg bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 flex items-center gap-1.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                  Cardinality Misestimates
-                </span>
-                <span className="px-2.5 py-1 rounded-lg bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 flex items-center gap-1.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-purple-500" />
-                  work_mem Disk Spills
-                </span>
-                <span className="px-2.5 py-1 rounded-lg bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 flex items-center gap-1.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                  Executable Index DDL
-                </span>
-              </div>
-            </div>
-
-            {/* Guest Connect with Gmail Callout */}
-            {!user && (
-              <div
-                id="guest-auth-prompt"
-                className="max-w-2xl mx-auto p-4 rounded-2xl bg-linear-to-r from-amber-500/10 via-amber-500/5 to-transparent border border-amber-500/30 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-2xs animate-in fade-in duration-300"
-              >
-                <div className="flex items-center gap-3 text-center sm:text-left">
-                  <div className="w-10 h-10 rounded-xl bg-amber-500/15 border border-amber-500/20 text-amber-900 dark:text-amber-300 flex items-center justify-center shrink-0">
-                    <Mail className="w-5 h-5 text-amber-600 dark:text-amber-400" />
-                  </div>
-                  <div>
-                    <div className="font-bold text-xs sm:text-sm text-zinc-900 dark:text-zinc-100 font-display">
-                      Connect with Gmail to create an account
-                    </div>
-                    <div className="text-[11px] text-zinc-600 dark:text-zinc-400 font-sans">
-                      Get 25 free analyses/day and sync EXPLAIN history across devices.
-                    </div>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  id="hero-connect-gmail-btn"
-                  onClick={() => handleOpenAuth("signup")}
-                  className="px-4 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-white text-white dark:text-zinc-900 font-bold text-xs flex items-center gap-2 transition-all shrink-0 cursor-pointer font-display shadow-sm active:scale-95"
-                >
-                  <Mail className="w-3.5 h-3.5 text-amber-400 dark:text-amber-600" />
-                  <span>Connect with Gmail</span>
-                </button>
-              </div>
-            )}
-
-            {/* Input component */}
+        {/* 3. Workbench (Desktop: 2 columns; Mobile: stacked) */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+          {/* Left Column: Input Panel */}
+          <div>
             <PlanInput
               onAnalyze={handleAnalyze}
               isLoading={isLoading}
               error={parseError}
+              onClearError={() => setParseError(null)}
+              entitlements={entitlements}
+              user={user}
+              onOpenUpgrade={() => setIsUpgradeOpen(true)}
             />
-
-            {/* Safe monetization ad placement (public, non-sensitive landing) */}
-            <AdSlot placement="landing_bottom" showAds={entitlements.show_ads} />
           </div>
-        ) : (
-          /* Analysis Results View */
-          <div className="space-y-4 sm:space-y-6 animate-in fade-in duration-200">
-            {/* Top Toolbar */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 p-3 sm:p-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-sm shadow-zinc-200/50 dark:shadow-none">
-              <div className="flex items-center gap-2 w-full sm:w-auto">
-                <button
-                  id="reset-plan-btn"
-                  onClick={() => setActiveAnalysis(null)}
-                  className="w-full sm:w-auto px-3.5 py-2 sm:py-1.5 rounded-xl border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer font-display active:scale-98"
-                >
-                  <RotateCcw className="w-3.5 h-3.5 text-zinc-500" />
-                  <span>Analyze Another Plan</span>
-                </button>
+
+          {/* Right Column: Results Panel (or empty state) */}
+          <div>
+            {activeAnalysis ? (
+              <div className="space-y-4">
+                {/* Results toolbar & executive metrics */}
+                <div className="p-3.5 rounded-[8px] border border-[var(--border)] bg-[var(--surface)] flex items-center justify-between gap-3 flex-wrap text-[13px]">
+                  <div className="flex items-center gap-3.5 flex-wrap">
+                    <div>
+                      <span className="text-[var(--muted)]">Execution: </span>
+                      <span className="font-mono font-medium text-[var(--text)]">
+                        {activeAnalysis.total_time_ms.toFixed(2)} ms
+                      </span>
+                    </div>
+                    {activeAnalysis.planning_time_ms !== undefined && (
+                      <div>
+                        <span className="text-[var(--muted)]">Planning: </span>
+                        <span className="font-mono font-medium text-[var(--text)]">
+                          {activeAnalysis.planning_time_ms.toFixed(2)} ms
+                        </span>
+                      </div>
+                    )}
+                    <div>
+                      <span className="text-[var(--muted)]">Findings: </span>
+                      <span className="font-mono font-medium text-[var(--text)]">
+                        {activeAnalysis.findings.length}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <button
+                      type="button"
+                      id="copy-markdown-report-btn"
+                      onClick={handleExportMarkdown}
+                      className="px-2 py-1 text-[12px] rounded-[6px] border border-[var(--border)] bg-[var(--bg)] text-[var(--text)] hover:border-[var(--text)] cursor-pointer transition-colors"
+                    >
+                      {copiedExport ? "Copied" : "Copy Markdown"}
+                    </button>
+                    <button
+                      type="button"
+                      id="export-json-btn"
+                      onClick={handleExportJson}
+                      className="px-2 py-1 text-[12px] rounded-[6px] border border-[var(--border)] bg-[var(--bg)] text-[var(--text)] hover:border-[var(--text)] cursor-pointer transition-colors"
+                    >
+                      Export JSON
+                    </button>
+                    <button
+                      type="button"
+                      id="clear-results-btn"
+                      onClick={() => setActiveAnalysis(null)}
+                      className="px-2 py-1 text-[12px] rounded-[6px] border border-[var(--border)] bg-[var(--bg)] text-[var(--muted)] hover:text-[var(--text)] cursor-pointer transition-colors"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                </div>
+
+                {/* Findings list */}
+                <FindingsList
+                  findings={activeAnalysis.findings}
+                  onSelectNodePath={handleSelectNodePath}
+                />
+
+                {/* Plan tree */}
+                <PlanTree
+                  root={activeAnalysis.root}
+                  totalTimeMs={activeAnalysis.total_time_ms}
+                  findings={activeAnalysis.findings}
+                  onSelectNode={(node) => setSelectedNode(node)}
+                />
               </div>
-
-              {/* Export Actions */}
-              <div className="flex items-center gap-2 w-full sm:w-auto">
-                <button
-                  id="copy-markdown-report-btn"
-                  onClick={handleExportMarkdown}
-                  className="flex-1 sm:flex-initial px-3 sm:px-3.5 py-2 sm:py-1.5 rounded-xl border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer font-display shadow-2xs active:scale-98"
-                  title="Copy formatted Markdown diagnostic report"
-                >
-                  {copiedExport ? (
-                    <>
-                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-                      <span className="text-emerald-600 dark:text-emerald-400">Copied!</span>
-                    </>
-                  ) : (
-                    <>
-                      <FileText className="w-3.5 h-3.5 text-zinc-500" />
-                      <span className="hidden sm:inline">Copy Markdown Report</span>
-                      <span className="sm:hidden">Markdown</span>
-                    </>
-                  )}
-                </button>
-
-                <button
-                  id="export-json-btn"
-                  onClick={handleExportJson}
-                  className="flex-1 sm:flex-initial px-3 sm:px-3.5 py-2 sm:py-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-white text-white dark:text-zinc-900 text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer font-display shadow-sm active:scale-98"
-                  title="Download analysis data as JSON"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Export JSON</span>
-                  <span className="sm:hidden">JSON</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Executive Metrics Overview */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3">
-              <div className="p-3 sm:p-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-2xs">
-                <div className="flex items-center justify-between text-[11px] sm:text-xs text-zinc-500 dark:text-zinc-400 font-medium">
-                  <span className="truncate">Execution Time</span>
-                  <Clock className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                </div>
-                <div className="text-lg sm:text-2xl font-bold font-mono text-zinc-900 dark:text-zinc-100 mt-1 sm:mt-1.5 tracking-tight truncate">
-                  {activeAnalysis.total_time_ms.toFixed(2)} <span className="text-xs font-normal text-zinc-400 font-sans">ms</span>
-                </div>
-                <div className="text-[10px] sm:text-[11px] text-zinc-400 font-sans mt-0.5 truncate">
-                  Actual execution duration
-                </div>
-              </div>
-
-              <div className="p-3 sm:p-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-2xs">
-                <div className="flex items-center justify-between text-[11px] sm:text-xs text-zinc-500 dark:text-zinc-400 font-medium">
-                  <span className="truncate">Planning Time</span>
-                  <Zap className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
-                </div>
-                <div className="text-lg sm:text-2xl font-bold font-mono text-zinc-900 dark:text-zinc-100 mt-1 sm:mt-1.5 tracking-tight truncate">
-                  {activeAnalysis.planning_time_ms !== undefined
-                    ? `${activeAnalysis.planning_time_ms.toFixed(2)}`
-                    : "N/A"}{" "}
-                  <span className="text-xs font-normal text-zinc-400 font-sans">ms</span>
-                </div>
-                <div className="text-[10px] sm:text-[11px] text-zinc-400 font-sans mt-0.5 truncate">
-                  {activeAnalysis.planning_time_ms !== undefined && activeAnalysis.total_time_ms > 0
-                    ? `${((activeAnalysis.planning_time_ms / activeAnalysis.total_time_ms) * 100).toFixed(1)}% of run`
-                    : "Planner overhead"}
-                </div>
-              </div>
-
-              <div className="p-3 sm:p-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-2xs">
-                <div className="flex items-center justify-between text-[11px] sm:text-xs text-zinc-500 dark:text-zinc-400 font-medium">
-                  <span className="truncate">Total Cost</span>
-                  <Database className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
-                </div>
-                <div className="text-lg sm:text-2xl font-bold font-mono text-zinc-900 dark:text-zinc-100 mt-1 sm:mt-1.5 tracking-tight truncate">
-                  {Math.round(activeAnalysis.total_cost).toLocaleString()}
-                </div>
-                <div className="text-[10px] sm:text-[11px] text-zinc-400 font-sans mt-0.5 truncate">
-                  Estimated cost units
-                </div>
-              </div>
-
-              <div className="p-3 sm:p-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-2xs">
-                <div className="flex items-center justify-between text-[11px] sm:text-xs text-zinc-500 dark:text-zinc-400 font-medium">
-                  <span className="truncate">Findings</span>
-                  <span
-                    className={`w-2 h-2 rounded-full shrink-0 ${
-                      activeAnalysis.findings.length > 0 ? "bg-amber-500" : "bg-emerald-500"
-                    }`}
-                  />
-                </div>
-                <div className="text-lg sm:text-2xl font-bold font-mono mt-1 sm:mt-1.5 flex items-baseline gap-1.5 truncate">
-                  <span className={activeAnalysis.findings.length > 0 ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"}>
-                    {activeAnalysis.findings.length}
-                  </span>
-                  <span className="text-[10px] sm:text-xs font-normal text-zinc-400 font-sans truncate">
-                    ({activeAnalysis.findings.filter((f) => f.severity === "critical").length} critical)
-                  </span>
-                </div>
-                <div className="text-[10px] sm:text-[11px] text-zinc-400 font-sans mt-0.5 truncate">
-                  Identified issues
-                </div>
-              </div>
-            </div>
-
-            {/* Optional SQL Query Reference Box */}
-            {activeQuerySql && (
-              <div className="p-3.5 sm:p-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-xs shadow-2xs">
-                <div className="font-bold text-zinc-700 dark:text-zinc-300 mb-1.5 flex items-center gap-2 font-display">
-                  <Code2 className="w-4 h-4 text-amber-500" />
-                  <span>Referenced SQL Query</span>
-                </div>
-                <pre className="font-mono text-xs text-zinc-800 dark:text-zinc-200 p-2.5 sm:p-3 rounded-xl bg-zinc-50 dark:bg-zinc-950/60 border border-zinc-200/80 dark:border-zinc-800/80 overflow-x-auto whitespace-pre-wrap leading-relaxed">
-                  {activeQuerySql}
-                </pre>
+            ) : (
+              <div className="h-full min-h-[380px] rounded-[8px] border border-dashed border-[var(--border)] bg-[var(--surface)] flex flex-col items-center justify-center p-8 text-center text-[var(--muted)]">
+                <p className="text-[14px] m-0">
+                  Results appear here after you run an analysis.
+                </p>
+                <p className="text-[12px] text-[var(--muted)] mt-1 m-0">
+                  Select a sample plan or paste your own EXPLAIN JSON to get started.
+                </p>
               </div>
             )}
-
-            {/* Performance Findings & Suggestions */}
-            <FindingsList
-              findings={activeAnalysis.findings}
-              onSelectNodePath={(nodePath) => {
-                const targetNode = findNodeByPath(activeAnalysis.root, nodePath);
-                if (targetNode) {
-                  setSelectedNode(targetNode);
-                }
-              }}
-            />
-
-            {/* Hierarchical Plan Tree Visualizer */}
-            <PlanTree
-              root={activeAnalysis.root}
-              totalTimeMs={activeAnalysis.total_time_ms}
-              findings={activeAnalysis.findings}
-              onSelectNode={(node) => setSelectedNode(node)}
-            />
           </div>
-        )}
+        </div>
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-zinc-200 dark:border-zinc-800 py-6 bg-white dark:bg-zinc-950 transition-colors text-xs text-zinc-500 dark:text-zinc-400">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
+      <footer className="mt-auto border-t border-[var(--border)] py-4">
+        <div className="max-w-[1120px] mx-auto px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-3 text-[13px]">
           <div className="flex items-center gap-2">
-            <Zap className="w-4 h-4 text-amber-500 fill-amber-500" />
-            <span className="font-bold text-zinc-900 dark:text-zinc-100 font-display">Slowgres</span>
-            <span className="font-sans">— PostgreSQL EXPLAIN Diagnostic Engine.</span>
+            <span className="font-semibold text-[var(--text)] font-display">Slowgres</span>
+            <span className="text-[var(--muted)]">· PostgreSQL EXPLAIN analyzer</span>
           </div>
 
-          <div className="flex items-center gap-4 font-sans">
+          <div className="flex items-center gap-4 text-[var(--muted)]">
             <button
+              type="button"
+              id="footer-privacy-btn"
               onClick={() => setLegalDoc("privacy")}
-              className="hover:text-zinc-900 dark:hover:text-zinc-200 transition-colors cursor-pointer"
+              className="hover:text-[var(--text)] cursor-pointer transition-colors"
             >
-              Privacy Policy
+              Privacy
             </button>
             <button
+              type="button"
+              id="footer-terms-btn"
               onClick={() => setLegalDoc("terms")}
-              className="hover:text-zinc-900 dark:hover:text-zinc-200 transition-colors cursor-pointer"
+              className="hover:text-[var(--text)] cursor-pointer transition-colors"
             >
               Terms of Service
             </button>
             <button
+              type="button"
+              id="footer-refunds-btn"
               onClick={() => setLegalDoc("refunds")}
-              className="hover:text-zinc-900 dark:hover:text-zinc-200 transition-colors cursor-pointer"
+              className="hover:text-[var(--text)] cursor-pointer transition-colors"
             >
               Refund Policy
             </button>
@@ -567,14 +565,12 @@ export default function App() {
         isOpen={isHistoryOpen}
         onClose={() => setIsHistoryOpen(false)}
         savedAnalyses={savedAnalyses}
-        onSelectAnalysis={(item) => {
-          setActiveAnalysis(item.analysis);
-          setActiveQuerySql(item.query_text || "");
+        onSelectAnalysis={(saved) => {
+          setActiveAnalysis(saved.analysis);
+          setActiveQuerySql(saved.query_text || "");
         }}
-        onDeleteAnalysis={(id) => {
-          setSavedAnalyses((prev) => prev.filter((a) => a.id !== id));
-        }}
-        onClearHistory={() => setSavedAnalyses([])}
+        onDeleteAnalysis={handleDeleteAnalysis}
+        onClearHistory={handleClearHistory}
         retentionDays={entitlements.history_retention_days}
       />
 
@@ -598,4 +594,6 @@ export default function App() {
       />
     </div>
   );
-}
+};
+
+export default App;
